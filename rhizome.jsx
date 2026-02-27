@@ -89,10 +89,11 @@ const getNodeHue = (i) => NODE_HUES[i % NODE_HUES.length];
 
 // ─── PERSISTENCE ───
 const STORAGE_KEY = "rhizome-graph";
+const DATA_VERSION = 1;
 
 async function saveGraph(nodes, edges) {
   try {
-    const data = JSON.stringify({ nodes, edges, savedAt: Date.now() });
+    const data = JSON.stringify({ version: DATA_VERSION, nodes, edges, savedAt: Date.now() });
     await window.storage.set(STORAGE_KEY, data);
   } catch (e) {
     console.error("save failed:", e);
@@ -120,6 +121,13 @@ async function clearGraph() {
 }
 
 // ─── SVG EDGE LAYER ───
+// deterministic pseudo-random from edge id — stable across renders
+const seedRand = (id) => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h) + id.charCodeAt(i);
+  return (n) => ((Math.abs(h * (n + 1) * 9301 + 49297) % 233280) / 233280 - 0.5) * 2; // -1 to 1
+};
+
 const EdgeLayer = memo(function EdgeLayer({ edges, nodes, panX, panY, zoom, selectedPath }) {
   const nodeMap = useMemo(() => {
     const m = new Map();
@@ -140,36 +148,71 @@ const EdgeLayer = memo(function EdgeLayer({ edges, nodes, panX, panY, zoom, sele
       position: "absolute", inset: 0, width: "100%", height: "100%",
       pointerEvents: "none", zIndex: 0,
     }}>
+      <defs>
+        {edges.map((edge) => {
+          const toneColor = edge.tone && TONES[edge.tone] ? TONES[edge.tone].color : "#888888";
+          return (
+            <linearGradient key={`g-${edge.id}`} id={`rg-${edge.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor={toneColor} stopOpacity="0" />
+              <stop offset="15%" stopColor={toneColor} stopOpacity="1" />
+              <stop offset="85%" stopColor={toneColor} stopOpacity="1" />
+              <stop offset="100%" stopColor={toneColor} stopOpacity="0" />
+            </linearGradient>
+          );
+        })}
+      </defs>
       {edges.map((edge) => {
         const fromNode = nodeMap.get(edge.from);
         const toNode = nodeMap.get(edge.to);
         if (!fromNode || !toNode) return null;
 
         const x1 = (fromNode.x + NODE_W / 2) * zoom + panX;
-        const y1 = (fromNode.y + (fromNode.h || NODE_MIN_H) / 2) * zoom + panY;
+        const y1 = (fromNode.y + (fromNode.h || NODE_MIN_H)) * zoom + panY;
         const x2 = (toNode.x + NODE_W / 2) * zoom + panX;
-        const y2 = (toNode.y + (toNode.h || NODE_MIN_H) / 2) * zoom + panY;
+        const y2 = (toNode.y) * zoom + panY;
 
-        const dx = x2 - x1;
-        const cx1 = x1 + dx * 0.4;
-        const cx2 = x2 - dx * 0.4;
+        const rand = seedRand(edge.id);
+        const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        const sag = dist * 0.25;
 
         const toneColor = edge.tone && TONES[edge.tone] ? TONES[edge.tone].color : "#888888";
         const inPath = pathSet.has(`${edge.from}->${edge.to}`);
 
+        // generate 3 root tendrils with organic wobble
+        const tendrils = [
+          { w: inPath ? 4 : 2.5, o: inPath ? 0.45 : 0.18, seed: 0 },
+          { w: inPath ? 2.5 : 1.5, o: inPath ? 0.35 : 0.12, seed: 3 },
+          { w: inPath ? 1.5 : 0.8, o: inPath ? 0.25 : 0.08, seed: 6 },
+        ];
+
         return (
           <g key={edge.id}>
-            <path
-              d={`M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`}
-              stroke={inPath ? "#ffffff" : toneColor}
-              strokeWidth={(inPath ? 2.5 : 1.5) * zoom}
-              strokeOpacity={inPath ? 0.6 : 0.2}
-              fill="none"
-            />
-            <circle r={2.5 * zoom} fill={toneColor} opacity={0.4}>
+            {tendrils.map((t, i) => {
+              const wobbleX = rand(t.seed) * sag * 0.5;
+              const wobbleY = rand(t.seed + 1) * sag * 0.3;
+              const midBulge = rand(t.seed + 2) * sag * 0.2;
+
+              const cx1 = x1 + wobbleX + (x2 - x1) * 0.25;
+              const cy1 = y1 + sag * 0.6 + wobbleY;
+              const cx2 = x2 - wobbleX + (x1 - x2) * 0.25;
+              const cy2 = y2 - sag * 0.3 + midBulge;
+
+              return (
+                <path
+                  key={i}
+                  d={`M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`}
+                  stroke={inPath ? "#ffffff" : `url(#rg-${edge.id})`}
+                  strokeWidth={t.w * zoom}
+                  strokeOpacity={t.o}
+                  fill="none"
+                  strokeLinecap="round"
+                />
+              );
+            })}
+            <circle r={2 * zoom} fill={toneColor} opacity={0.5}>
               <animateMotion
-                dur="3s" repeatCount="indefinite"
-                path={`M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`}
+                dur={`${3 + rand(9) * 1.5}s`} repeatCount="indefinite"
+                path={`M ${x1} ${y1} C ${x1 + (x2 - x1) * 0.25} ${y1 + sag * 0.6}, ${x2 + (x1 - x2) * 0.25} ${y2 - sag * 0.3}, ${x2} ${y2}`}
               />
             </circle>
           </g>
@@ -183,7 +226,7 @@ const EdgeLayer = memo(function EdgeLayer({ edges, nodes, panX, panY, zoom, sele
 const NodeCard = memo(function NodeCard({
   node, hue, zoom, onMouseDown, onStartConnect, onDropConnect,
   isConnectSource, isConnectTarget, onClickSentence, activeReplyNodeId,
-  essayMode, onToggleEssaySelect, isInEssayPath,
+  essayMode, onToggleEssaySelect, isInEssayPath, onMeasure,
 }) {
   const [hoveredSeg, setHoveredSeg] = useState(null);
   const [segments, setSegments] = useState([]);
@@ -204,9 +247,9 @@ const NodeCard = memo(function NodeCard({
   }, [node.text, node.role]);
 
   useEffect(() => {
-    if (cardRef.current && node.onMeasure) {
+    if (cardRef.current && onMeasure) {
       const h = cardRef.current.getBoundingClientRect().height / zoom;
-      node.onMeasure(h);
+      onMeasure(node.id, h);
     }
   }, [segments, zoom]);
 
@@ -231,12 +274,12 @@ const NodeCard = memo(function NodeCard({
           : isConnectTarget ? toneColor + "88"
           : hue.border
         }`,
-        borderRadius: 12, padding: "14px 16px",
+        borderRadius: 24, padding: "16px 18px",
         cursor: essayMode ? "pointer" : "grab",
         boxShadow: isInEssayPath
-          ? `0 0 20px rgba(255,255,255,0.1), 0 0 0 1px #ffffff44`
-          : `0 4px 20px rgba(0,0,0,0.3)`,
-        transition: "box-shadow 0.2s, border-color 0.2s",
+          ? `0 0 24px rgba(255,255,255,0.08), 0 0 0 1px #ffffff33`
+          : `0 6px 28px rgba(0,0,0,0.4), 0 0 0 1px ${hue.border}`,
+        transition: "box-shadow 0.3s, border-color 0.3s, opacity 0.3s",
         userSelect: "none",
         animation: "nodeAppear 0.4s ease-out both",
         opacity: essayMode && !isInEssayPath ? 0.4 : 1,
@@ -343,7 +386,7 @@ function ReplyPanel({ x, y, sentence, onSubmit, onCancel }) {
     <div style={{
       position: "absolute", left: x, top: y, width: NODE_W,
       background: "#0c0c16", border: "1px solid #b8a9e833",
-      borderRadius: 10, padding: "12px 14px", zIndex: 999,
+      borderRadius: 20, padding: "14px 16px", zIndex: 999,
       animation: "nodeAppear 0.3s ease-out",
       boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
     }}>
@@ -561,6 +604,12 @@ export default function RhizomeConversations() {
     statusTimeout.current = setTimeout(() => setSaveStatus(""), duration);
   }, []);
 
+  const handleMeasure = useCallback((nodeId, h) => {
+    setNodes((prev) => prev.map((n) =>
+      n.id === nodeId && n.h !== h ? { ...n, h } : n
+    ));
+  }, []);
+
   // cleanup status timeout on unmount
   useEffect(() => {
     return () => { if (statusTimeout.current) clearTimeout(statusTimeout.current); };
@@ -597,9 +646,7 @@ export default function RhizomeConversations() {
     if (!initialized || nodes.length === 0) return;
     if (saveTimeout.current) clearTimeout(saveTimeout.current);
     saveTimeout.current = setTimeout(async () => {
-      // strip non-serializable stuff
-      const cleanNodes = nodes.map(({ onMeasure, ...rest }) => rest);
-      await saveGraph(cleanNodes, edges);
+      await saveGraph(nodes, edges);
       showStatus("saved");
     }, 1500);
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current); };
@@ -640,27 +687,29 @@ export default function RhizomeConversations() {
         messages: [{ role: "user", content: userMsg }],
       }),
     });
-    if (!resp.ok) throw new Error(`api ${resp.status}`);
+    if (!resp.ok) {
+      const msgs = { 429: "rate limited — wait a moment and try again", 500: "claude is having a rough one — try again", 529: "claude is overloaded rn — try again in a bit" };
+      throw new Error(msgs[resp.status] || `something went wrong (${resp.status})`);
+    }
     const data = await resp.json();
     return data.content?.filter((b) => b.type === "text").map((b) => b.text).join("\n") || "";
   };
 
   const buildContext = useCallback((nodeId) => {
+    // walk only UP the parent chain — edges go from→to (parent→child),
+    // so follow e.to === id backwards to find ancestors
+    const ancestors = [];
     const visited = new Set();
-    const result = [];
-    const walk = (id, depth) => {
-      if (visited.has(id) || depth > 6) return;
-      visited.add(id);
-      const node = nodes.find((n) => n.id === id);
-      if (!node) return;
-      result.push(`[${node.role}${node.tone ? ` (${node.tone})` : ""}]: ${node.text}`);
-      edges.filter((e) => e.from === id || e.to === id).forEach((e) => {
-        const nextId = e.from === id ? e.to : e.from;
-        walk(nextId, depth + 1);
-      });
-    };
-    walk(nodeId, 0);
-    return result.join("\n\n");
+    let currentId = nodeId;
+    while (currentId && ancestors.length < 8 && !visited.has(currentId)) {
+      visited.add(currentId);
+      const node = nodes.find((n) => n.id === currentId);
+      if (!node) break;
+      ancestors.unshift(`[${node.role}${node.tone ? ` (${node.tone})` : ""}]: ${node.text}`);
+      const parentEdge = edges.find((e) => e.to === currentId);
+      currentId = parentEdge ? parentEdge.from : null;
+    }
+    return ancestors.join("\n\n");
   }, [nodes, edges]);
 
   // ─── SEED ───
@@ -773,6 +822,7 @@ export default function RhizomeConversations() {
   // ─── ESSAY MODE ───
   const toggleEssayMode = () => {
     if (essayMode) {
+      if (essayPath.length > 0 && !window.confirm("exit essay mode? your selected path will be lost.")) return;
       setEssayMode(false);
       setEssayPath([]);
       setEssayText("");
@@ -855,21 +905,27 @@ export default function RhizomeConversations() {
     });
   };
 
+  const rafRef = useRef(null);
   const handleMouseMove = useCallback((e) => {
-    if (isPanning) {
-      setPanX(panStart.current.px + e.clientX - panStart.current.x);
-      setPanY(panStart.current.py + e.clientY - panStart.current.y);
-    }
-    if (dragging) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const wx = (e.clientX - rect.left - panX) / zoom;
-      const wy = (e.clientY - rect.top - panY) / zoom;
-      setNodes((prev) => prev.map((n) =>
-        n.id === dragging.nodeId
-          ? { ...n, x: wx - dragging.offsetX, y: wy - dragging.offsetY }
-          : n
-      ));
-    }
+    if (!isPanning && !dragging) return;
+    if (rafRef.current) return; // skip if a frame is already queued
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      if (isPanning) {
+        setPanX(panStart.current.px + e.clientX - panStart.current.x);
+        setPanY(panStart.current.py + e.clientY - panStart.current.y);
+      }
+      if (dragging) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const wx = (e.clientX - rect.left - panX) / zoom;
+        const wy = (e.clientY - rect.top - panY) / zoom;
+        setNodes((prev) => prev.map((n) =>
+          n.id === dragging.nodeId
+            ? { ...n, x: wx - dragging.offsetX, y: wy - dragging.offsetY }
+            : n
+        ));
+      }
+    });
   }, [isPanning, dragging, panX, panY, zoom]);
 
   const handleMouseUp = useCallback(() => { setIsPanning(false); setDragging(null); }, []);
@@ -1197,16 +1253,10 @@ export default function RhizomeConversations() {
           {nodes.map((node) => (
             <NodeCard
               key={node.id}
-              node={{
-                ...node,
-                onMeasure: (h) => {
-                  setNodes((prev) => prev.map((n) =>
-                    n.id === node.id && n.h !== h ? { ...n, h } : n
-                  ));
-                },
-              }}
+              node={node}
               hue={getNodeHue(node.hueIdx || 0)}
               zoom={zoom}
+              onMeasure={handleMeasure}
               onMouseDown={handleNodeMouseDown(node.id)}
               onStartConnect={handleStartConnect}
               onDropConnect={handleDropConnect}
