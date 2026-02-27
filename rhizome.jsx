@@ -1024,7 +1024,7 @@ export default function RhizomeConversations() {
         backgroundImage: `url(${PEONY_ART})`,
         backgroundSize: "cover",
         backgroundPosition: "top right",
-        opacity: seeded ? 0.05 : 0.12,
+        opacity: seeded ? 0.12 : 0.22,
         maskImage: "radial-gradient(ellipse at 0% 100%, black 15%, transparent 70%)",
         WebkitMaskImage: "radial-gradient(ellipse at 0% 100%, black 15%, transparent 70%)",
         transition: "opacity 1.5s ease, width 1.5s ease, height 1.5s ease",
