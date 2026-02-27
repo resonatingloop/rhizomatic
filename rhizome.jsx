@@ -93,6 +93,7 @@ const DATA_VERSION = 1;
 
 async function saveGraph(nodes, edges) {
   try {
+    if (!window.storage?.set) return;
     const data = JSON.stringify({ version: DATA_VERSION, nodes, edges, savedAt: Date.now() });
     await window.storage.set(STORAGE_KEY, data);
   } catch (e) {
@@ -102,7 +103,11 @@ async function saveGraph(nodes, edges) {
 
 async function loadGraph() {
   try {
-    const result = await window.storage.get(STORAGE_KEY);
+    if (!window.storage?.get) return null;
+    const result = await Promise.race([
+      window.storage.get(STORAGE_KEY),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("storage timeout")), 3000)),
+    ]);
     if (result && result.value) {
       return JSON.parse(result.value);
     }
@@ -114,6 +119,7 @@ async function loadGraph() {
 
 async function clearGraph() {
   try {
+    if (!window.storage?.delete) return;
     await window.storage.delete(STORAGE_KEY);
   } catch (e) {
     console.error("clear failed:", e);
