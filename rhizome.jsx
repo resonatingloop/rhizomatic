@@ -1024,7 +1024,7 @@ export default function RhizomeConversations() {
                 }}
               >{essayMode ? "exit essay" : "essay mode"}</button>
             )}
-            {seeded && (
+            {seeded && (<>
               <button onClick={handleReset} style={{
                 fontFamily: "'DM Mono', monospace", fontSize: 9,
                 color: "#7d778e", background: "transparent",
@@ -1045,13 +1045,13 @@ export default function RhizomeConversations() {
                 color: "#7d778e", background: "transparent",
                 border: "1px solid #7d778e30", borderRadius: 5,
                 padding: "4px 10px", cursor: "pointer", letterSpacing: "0.05em",
-              }}>save ↓</button>
+              }}>{"save \u2193"}</button>
               <button onClick={() => {
                 const input = document.createElement("input");
                 input.type = "file";
                 input.accept = ".json";
-                input.onchange = async (e) => {
-                  const file = e.target.files[0];
+                input.onchange = async (evt) => {
+                  const file = evt.target.files[0];
                   if (!file) return;
                   try {
                     const text = await file.text();
@@ -1067,7 +1067,7 @@ export default function RhizomeConversations() {
                       setTimeout(() => setSaveStatus(""), 1500);
                     }
                   } catch (err) {
-                    console.error("import failed:", err);
+                    console.error("load failed:", err);
                   }
                 };
                 input.click();
@@ -1076,8 +1076,8 @@ export default function RhizomeConversations() {
                 color: "#7d778e", background: "transparent",
                 border: "1px solid #7d778e30", borderRadius: 5,
                 padding: "4px 10px", cursor: "pointer", letterSpacing: "0.05em",
-              }}>load ↑</button>
-            )}
+              }}>{"load \u2191"}</button>
+            </>)}
           </div>
         </div>
       </div>
