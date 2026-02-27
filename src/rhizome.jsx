@@ -683,9 +683,19 @@ export default function RhizomeConversations() {
 
   // ─── API ───
   const callClaude = async (userMsg, systemPrompt) => {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    // In local dev, Vite proxies /api → api.anthropic.com and injects the key.
+    // In the artifact sandbox, call the API directly (claude.ai handles auth).
+    const isLocal = typeof import.meta !== "undefined" && import.meta.env?.VITE_ANTHROPIC_API_KEY;
+    const url = isLocal ? "/api/v1/messages" : "https://api.anthropic.com/v1/messages";
+    const headers = { "Content-Type": "application/json" };
+    if (isLocal) {
+      headers["x-api-key"] = import.meta.env.VITE_ANTHROPIC_API_KEY;
+      headers["anthropic-version"] = "2023-06-01";
+      headers["anthropic-dangerous-direct-browser-access"] = "true";
+    }
+    const resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1000,
