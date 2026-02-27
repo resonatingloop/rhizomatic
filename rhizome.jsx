@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, memo, useMemo } from "react";
 
 // ─── TONES ───
 const TONES = {
@@ -120,7 +120,13 @@ async function clearGraph() {
 }
 
 // ─── SVG EDGE LAYER ───
-function EdgeLayer({ edges, nodes, panX, panY, zoom, selectedPath }) {
+const EdgeLayer = memo(function EdgeLayer({ edges, nodes, panX, panY, zoom, selectedPath }) {
+  const nodeMap = useMemo(() => {
+    const m = new Map();
+    nodes.forEach((n) => m.set(n.id, n));
+    return m;
+  }, [nodes]);
+
   const pathSet = new Set();
   if (selectedPath) {
     for (let i = 0; i < selectedPath.length - 1; i++) {
@@ -135,8 +141,8 @@ function EdgeLayer({ edges, nodes, panX, panY, zoom, selectedPath }) {
       pointerEvents: "none", zIndex: 0,
     }}>
       {edges.map((edge) => {
-        const fromNode = nodes.find((n) => n.id === edge.from);
-        const toNode = nodes.find((n) => n.id === edge.to);
+        const fromNode = nodeMap.get(edge.from);
+        const toNode = nodeMap.get(edge.to);
         if (!fromNode || !toNode) return null;
 
         const x1 = (fromNode.x + NODE_W / 2) * zoom + panX;
@@ -171,10 +177,10 @@ function EdgeLayer({ edges, nodes, panX, panY, zoom, selectedPath }) {
       })}
     </svg>
   );
-}
+});
 
 // ─── NODE CARD ───
-function NodeCard({
+const NodeCard = memo(function NodeCard({
   node, hue, zoom, onMouseDown, onStartConnect, onDropConnect,
   isConnectSource, isConnectTarget, onClickSentence, activeReplyNodeId,
   essayMode, onToggleEssaySelect, isInEssayPath,
@@ -325,7 +331,7 @@ function NodeCard({
       )}
     </div>
   );
-}
+});
 
 // ─── REPLY PANEL ───
 function ReplyPanel({ x, y, sentence, onSubmit, onCancel }) {
@@ -546,6 +552,19 @@ export default function RhizomeConversations() {
   const [saveStatus, setSaveStatus] = useState("");
 
   const containerRef = useRef(null);
+  const statusTimeout = useRef(null);
+  const nodesRef = useRef(nodes);
+
+  const showStatus = useCallback((status, duration = 1500) => {
+    if (statusTimeout.current) clearTimeout(statusTimeout.current);
+    setSaveStatus(status);
+    statusTimeout.current = setTimeout(() => setSaveStatus(""), duration);
+  }, []);
+
+  // cleanup status timeout on unmount
+  useEffect(() => {
+    return () => { if (statusTimeout.current) clearTimeout(statusTimeout.current); };
+  }, []);
 
   // ─── LOAD ON MOUNT ───
   useEffect(() => {
@@ -557,17 +576,16 @@ export default function RhizomeConversations() {
         setSeeded(true);
         // restore id counters
         const maxNid = saved.nodes.reduce((m, n) => {
-          const num = parseInt(n.id.replace("nd", ""), 10);
+          const num = parseInt(n.id.replace("nd", ""), 10) || 0;
           return num > m ? num : m;
         }, 0);
         const maxEid = (saved.edges || []).reduce((m, e) => {
-          const num = parseInt(e.id.replace("ed", ""), 10);
+          const num = parseInt(e.id.replace("ed", ""), 10) || 0;
           return num > m ? num : m;
         }, 0);
         _nid = maxNid;
         _eid = maxEid;
-        setSaveStatus("loaded");
-        setTimeout(() => setSaveStatus(""), 2000);
+        showStatus("loaded", 2000);
       }
       setInitialized(true);
     })();
@@ -582,8 +600,7 @@ export default function RhizomeConversations() {
       // strip non-serializable stuff
       const cleanNodes = nodes.map(({ onMeasure, ...rest }) => rest);
       await saveGraph(cleanNodes, edges);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus(""), 1500);
+      showStatus("saved");
     }, 1500);
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current); };
   }, [nodes, edges, initialized]);
@@ -594,6 +611,9 @@ export default function RhizomeConversations() {
     : responseLength === "long"
     ? "\n\nIMPORTANT: give an extended, thorough response — 5-8 sentences, explore the idea fully."
     : "\n\nkeep your response to 2-4 sentences.";
+
+  // keep nodesRef current for keyboard handler
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
 
   // ─── KEYBOARD SHORTCUTS ───
   useEffect(() => {
@@ -606,7 +626,7 @@ export default function RhizomeConversations() {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [nodes]);
+  }, []);
 
   // ─── API ───
   const callClaude = async (userMsg, systemPrompt) => {
@@ -667,7 +687,8 @@ export default function RhizomeConversations() {
     setEdges([edge]);
 
     try {
-      const sys = TONES[tone].system(`[user]: ${text}`) + lengthInstruction;
+      const activeTone = TONES[tone] ? tone : "familiar";
+      const sys = TONES[activeTone].system(`[user]: ${text}`) + lengthInstruction;
       const reply = await callClaude(text, sys);
       setNodes((prev) => prev.map((n) =>
         n.id === aiId ? { ...n, text: reply, loading: false } : n
@@ -691,11 +712,12 @@ export default function RhizomeConversations() {
   const handleSubmitReply = async (text) => {
     if (!replyState || loading) return;
     const { nodeId, sentence } = replyState;
-    setLoading(true);
-    setError(null);
 
     const parentNode = nodes.find((n) => n.id === nodeId);
     if (!parentNode) return;
+
+    setLoading(true);
+    setError(null);
 
     const angle = (Math.random() - 0.5) * Math.PI * 0.6;
     const dist = 200 + Math.random() * 80;
@@ -722,7 +744,8 @@ export default function RhizomeConversations() {
     try {
       const ctx = buildContext(nodeId) +
         `\n\n[user responds to: "${sentence}"]\n[user]: ${text}`;
-      const sys = TONES[tone].system(ctx) + lengthInstruction;
+      const activeTone = TONES[tone] ? tone : "familiar";
+      const sys = TONES[activeTone].system(ctx) + lengthInstruction;
       const reply = await callClaude(text, sys);
       setNodes((prev) => prev.map((n) =>
         n.id === aiId ? { ...n, text: reply, loading: false } : n
@@ -868,15 +891,16 @@ export default function RhizomeConversations() {
     return () => el.removeEventListener("wheel", h);
   }, []);
 
-  const handleRecenter = () => {
-    if (nodes.length === 0) return;
+  const handleRecenter = useCallback(() => {
+    const currentNodes = nodesRef.current;
+    if (currentNodes.length === 0) return;
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const pad = 80;
-    const minX = Math.min(...nodes.map((n) => n.x));
-    const minY = Math.min(...nodes.map((n) => n.y));
-    const maxX = Math.max(...nodes.map((n) => n.x + NODE_W));
-    const maxY = Math.max(...nodes.map((n) => n.y + (n.h || NODE_MIN_H)));
+    const minX = Math.min(...currentNodes.map((n) => n.x));
+    const minY = Math.min(...currentNodes.map((n) => n.y));
+    const maxX = Math.max(...currentNodes.map((n) => n.x + NODE_W));
+    const maxY = Math.max(...currentNodes.map((n) => n.y + (n.h || NODE_MIN_H)));
     const graphW = maxX - minX + pad * 2;
     const graphH = maxY - minY + pad * 2;
     const newZoom = Math.min(1.2, Math.max(0.25, Math.min(rect.width / graphW, rect.height / graphH)));
@@ -885,7 +909,7 @@ export default function RhizomeConversations() {
     setPanX(rect.width / 2 - centerX * newZoom);
     setPanY(rect.height / 2 - centerY * newZoom);
     setZoom(newZoom);
-  };
+  }, []);
 
   const handleReset = async () => {
     setNodes([]); setEdges([]); setSeeded(false);
@@ -895,8 +919,7 @@ export default function RhizomeConversations() {
     setPanX(0); setPanY(0); setZoom(1);
     _nid = 0; _eid = 0;
     await clearGraph();
-    setSaveStatus("cleared");
-    setTimeout(() => setSaveStatus(""), 1500);
+    showStatus("cleared");
   };
 
   if (!initialized) {
@@ -1056,17 +1079,31 @@ export default function RhizomeConversations() {
                   try {
                     const text = await file.text();
                     const snap = JSON.parse(text);
-                    if (snap.nodes && snap.edges) {
-                      setNodes(snap.nodes);
-                      setEdges(snap.edges);
-                      setSeeded(snap.nodes.length > 0);
-                      _nid = Math.max(0, ...snap.nodes.map(n => n.id)) + 1;
-                      _eid = Math.max(0, ...snap.edges.map(x => x.id)) + 1;
-                      await saveGraph(snap.nodes, snap.edges);
-                      setSaveStatus("loaded");
-                      setTimeout(() => setSaveStatus(""), 1500);
+                    if (!Array.isArray(snap.nodes) || !Array.isArray(snap.edges)) {
+                      setError("invalid snapshot: missing nodes or edges array");
+                      return;
                     }
+                    const validNodes = snap.nodes.every(n => n.id && typeof n.x === "number" && typeof n.y === "number" && typeof n.text === "string");
+                    const validEdges = snap.edges.every(e => e.id && e.from && e.to);
+                    if (!validNodes || !validEdges) {
+                      setError("invalid snapshot: malformed node or edge data");
+                      return;
+                    }
+                    setNodes(snap.nodes);
+                    setEdges(snap.edges);
+                    setSeeded(snap.nodes.length > 0);
+                    _nid = snap.nodes.reduce((m, n) => {
+                      const num = parseInt(n.id.replace("nd", ""), 10) || 0;
+                      return num > m ? num : m;
+                    }, 0);
+                    _eid = snap.edges.reduce((m, e) => {
+                      const num = parseInt(e.id.replace("ed", ""), 10) || 0;
+                      return num > m ? num : m;
+                    }, 0);
+                    await saveGraph(snap.nodes, snap.edges);
+                    showStatus("loaded");
                   } catch (err) {
+                    setError("failed to load snapshot");
                     console.error("load failed:", err);
                   }
                 };
