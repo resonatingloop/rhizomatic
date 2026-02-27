@@ -956,15 +956,15 @@ export default function RhizomeConversations() {
 
       {/* Corner art — peony wireframe */}
       <div style={{
-        position: "absolute", bottom: 0, right: 0,
-        width: seeded ? 300 : 450, height: seeded ? 300 : 450,
+        position: "absolute", bottom: 0, left: 0,
+        width: seeded ? 350 : 500, height: seeded ? 350 : 500,
         pointerEvents: "none", zIndex: 0,
         backgroundImage: `url(${PEONY_ART})`,
         backgroundSize: "cover",
-        backgroundPosition: "top left",
-        opacity: seeded ? 0.07 : 0.16,
-        maskImage: "radial-gradient(ellipse at 100% 100%, black 20%, transparent 75%)",
-        WebkitMaskImage: "radial-gradient(ellipse at 100% 100%, black 20%, transparent 75%)",
+        backgroundPosition: "top right",
+        opacity: seeded ? 0.05 : 0.12,
+        maskImage: "radial-gradient(ellipse at 0% 100%, black 15%, transparent 70%)",
+        WebkitMaskImage: "radial-gradient(ellipse at 0% 100%, black 15%, transparent 70%)",
         transition: "opacity 1.5s ease, width 1.5s ease, height 1.5s ease",
       }} />
 
